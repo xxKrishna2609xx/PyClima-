@@ -768,9 +768,11 @@ def main() -> None:
 		return
 
 	if analysis_mode == "Climate Hotspots":
-		variables = variables_with_lat_lon(ds)
+		spatial_vars = variables_with_lat_lon(ds)
+		temporal_vars = set(variables_with_time_dim(ds))
+		variables = [v for v in spatial_vars if v in temporal_vars]
 		if not variables:
-			st.error("No variables with lat/lon dimensions are available for hotspots.")
+			st.error("No variables with both spatial and temporal dimensions are available for hotspots.")
 			return
 		variable = st.sidebar.selectbox("Variable", variables)
 		min_year, max_year = dataset_year_bounds(ds)
