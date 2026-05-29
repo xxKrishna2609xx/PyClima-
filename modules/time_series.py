@@ -23,7 +23,8 @@ def show_time_series(ds: xr.Dataset, variable: str, lat: float, lon: float, time
 		if dim.lower() == "time":
 			data = data.sortby(dim)
 			break
-	idx = get_time_index(data.to_dataset(), coord_name=time_coord, data=data)
+	# Pass the original ds — not data.to_dataset() — so the parent time coordinate is preserved
+	idx = get_time_index(ds, coord_name=time_coord, data=data)
 	if idx is None:
 		raise ValueError("Dataset is missing a valid time coordinate (looked for time/date-like coords)")
 	series = pd.Series(data.values, index=idx)

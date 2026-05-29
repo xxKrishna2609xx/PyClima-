@@ -171,7 +171,9 @@ def get_time_index(ds: xr.Dataset, coord_name: Optional[str] = None, data: xr.Da
 		return None
 	coord = ds[name] if name in ds else None
 	if coord is None and data is not None and name in data.dims:
-		return pd.RangeIndex(len(data[name])) if name in data.coords else pd.RangeIndex(data.sizes[name])
+		# Cannot produce a valid DatetimeIndex from an integer range — return None so
+		# callers can fall back gracefully instead of receiving nonsensical epoch dates.
+		return None
 	if coord is None:
 		return None
 	# First try xarray's own index (handles CFTimeIndex)

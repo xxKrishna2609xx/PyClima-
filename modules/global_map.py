@@ -9,7 +9,7 @@ import pandas as pd
 import plotly.express as px
 import xarray as xr
 
-from .data_loader import get_time_index
+from .data_loader import get_time_index, time_coord_candidates
 
 
 def _select_time_for_year(ds: xr.Dataset, year: int) -> Optional[pd.Timestamp]:
@@ -26,8 +26,11 @@ def show_global_map(ds: xr.Dataset, variable: str, year: int):
 
 	timestamp = _select_time_for_year(ds, year)
 	data = ds[variable]
-	if timestamp is not None and "time" in data.dims:
-		data = data.sel(time=timestamp, method="nearest")
+	# Dynamically find the time-like dimension instead of hard-coding "time"
+	if timestamp is not None:
+		time_dims = [d for d in time_coord_candidates(ds, data=data) if d in data.dims]
+		if time_dims:
+			data = data.sel({time_dims[0]: timestamp}, method="nearest")
 	if "lat" in data.dims:
 		data = data.sortby("lat")
 	if "lon" in data.dims:

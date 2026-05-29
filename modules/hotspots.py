@@ -18,6 +18,12 @@ def _slice_years(ds: xr.Dataset, start_year: int, end_year: int, data: xr.DataAr
 		raise ValueError("Dataset lacks a valid time coordinate")
 	start = pd.Timestamp(year=start_year, month=1, day=1)
 	end = pd.Timestamp(year=end_year, month=12, day=31)
+	# Guard: idx must be a DatetimeIndex for Timestamp comparisons to work
+	if not isinstance(idx, pd.DatetimeIndex):
+		raise ValueError(
+			f"Time coordinate '{coord_name}' could not be interpreted as dates "
+			f"(got {type(idx).__name__}). Ensure the dataset has a valid time axis."
+		)
 	mask = (idx >= start) & (idx <= end)
 	return ds.isel({coord_name: mask})
 

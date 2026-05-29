@@ -171,8 +171,11 @@ def _extract_series(
 		raise ValueError("Dataset time coordinate could not be interpreted as dates")
 
 	values = np.asarray(data.values, dtype="float64").reshape(-1)
-	if len(values) != len(idx):
+	# Reconcile length mismatches in both directions
+	if len(values) > len(idx):
 		values = values[: len(idx)]
+	elif len(values) < len(idx):
+		idx = idx[: len(values)]
 
 	series = pd.Series(values, index=pd.DatetimeIndex(idx), name=variable)
 	series = series.replace([np.inf, -np.inf], np.nan).dropna().sort_index()
@@ -225,14 +228,18 @@ def _variable_category(variable: str) -> str:
 
 def _variable_label_map(variables: list[str]) -> dict[str, str]:
 	label_map: dict[str, str] = {}
+	# Track existing labels (keys) in a set for O(1) lookup
+	existing_labels: set[str] = set()
 	for var in variables:
 		base = f"{_variable_category(var)} - {var}"
 		label = base
 		i = 2
-		while label in label_map:
+		# Keep incrementing suffix until we find a label not yet used
+		while label in existing_labels:
 			label = f"{base} ({i})"
 			i += 1
 		label_map[label] = var
+		existing_labels.add(label)
 	return label_map
 
 
@@ -494,7 +501,8 @@ def _render_comparison_dashboard(primary_ds: xr.Dataset) -> None:
 
 	model_unit_raw = str(model_ds[model_variable].attrs.get("units", "")).strip()
 	obs_unit_raw = str(obs_ds[obs_variable].attrs.get("units", "")).strip()
-	unit_raw = model_unit_raw if model_unit_raw == obs_unit_raw else model_unit_raw
+	# Only show a unit when both datasets agree; otherwise omit to avoid misleading labels
+	unit_raw = model_unit_raw if model_unit_raw == obs_unit_raw else ""
 	unit = f" {unit_raw}" if unit_raw else ""
 
 	model_mean = float(df["Model"].mean())

@@ -17,7 +17,8 @@ def _extract_series(ds: xr.Dataset, variable: str, lat: float, lon: float) -> pd
 		data = data.sel(lon=lon, method="nearest")
 	if "time" in data.dims:
 		data = data.sortby("time")
-	idx = get_time_index(data.to_dataset())
+	# Pass the original ds — not data.to_dataset() — so the parent time coordinate is preserved
+	idx = get_time_index(ds)
 	if idx is None:
 		raise ValueError("Time coordinate missing in dataset")
 	return pd.Series(data.values, index=idx)
