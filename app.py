@@ -10,7 +10,6 @@ import xarray as xr
 from modules.data_loader import (
 	dataset_lat_bounds,
 	dataset_lon_bounds,
-	dataset_variables,
 	dataset_year_bounds,
 	get_time_index,
 	load_dataset,
@@ -814,10 +813,6 @@ def main() -> None:
 		except Exception as exc:
 			st.error(f"Unable to detect hotspots: {exc}")
 		return
-
-	available = dataset_variables(ds)
-	if available:
-		st.info("No matching analysis mode selected. Choose a mode from the sidebar.")
 
 
 if __name__ == "__main__":
