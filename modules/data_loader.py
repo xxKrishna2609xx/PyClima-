@@ -33,10 +33,18 @@ def _decode_cf_safe(ds: xr.Dataset) -> xr.Dataset:
 
 	try:
 		return xr.decode_cf(ds, use_cftime=True)
-	except Exception:
+	except Exception as exc:
+		st.warning(
+			f"CF time decoding with cftime failed ({exc}); "
+			"falling back to decode_times=False."
+		)
 		try:
 			return xr.decode_cf(ds, decode_times=False)
-		except Exception:
+		except Exception as exc2:
+			st.warning(
+				f"CF decoding with decode_times=False also failed ({exc2}); "
+				"returning raw dataset — time-based features may not work correctly."
+			)
 			return ds
 
 

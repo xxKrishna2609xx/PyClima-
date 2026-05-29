@@ -84,5 +84,3 @@ Acknowledgements
 ----------------
 - Built with Streamlit, xarray, NetCDF4/h5netcdf, pandas, numpy, plotly.
 - Climate datasets courtesy of CESM/BEST collections (see datasets/ for filenames).
-# PyClimaExplorer
-# PyClimaExplorer

@@ -68,7 +68,8 @@ def _inject_custom_css() -> None:
 def _preferred_local_dataset() -> tuple[str | None, Path | None]:
 	if SAMPLE_DATA_PATH.exists():
 		return SAMPLE_DATA_PATH.name, SAMPLE_DATA_PATH
-	alt_files = list(Path("datasets").glob("*.nc"))
+	# Sort so the first file is always the same regardless of filesystem ordering
+	alt_files = sorted(Path("datasets").glob("*.nc"))
 	if alt_files:
 		path = alt_files[0]
 		return path.name, path
@@ -462,23 +463,44 @@ def _render_comparison_dashboard(primary_ds: xr.Dataset) -> None:
 
 	lat_bounds = _intersect_bounds(dataset_lat_bounds(model_ds), dataset_lat_bounds(obs_ds))
 	lon_bounds = _intersect_bounds(dataset_lon_bounds(model_ds), dataset_lon_bounds(obs_ds))
+	# key= is required to avoid DuplicateWidgetID when switching between dashboard modes
 	lat = st.sidebar.slider(
 		"Latitude",
 		float(lat_bounds[0]),
 		float(lat_bounds[1]),
 		value=float((lat_bounds[0] + lat_bounds[1]) / 2),
+		key="cmp_lat",
 	)
 	lon = st.sidebar.slider(
 		"Longitude",
 		float(lon_bounds[0]),
 		float(lon_bounds[1]),
 		value=float((lon_bounds[0] + lon_bounds[1]) / 2),
+		key="cmp_lon",
 	)
-	show_trend = st.sidebar.toggle("Show trend lines", value=True)
+
+	# Time-coordinate selectors — mirror the Time Series tab so users can override
+	# when a dataset has multiple time-like dimensions
+	model_data_var = model_ds[model_variable]
+	model_time_candidates = time_coord_candidates(model_ds, data=model_data_var)
+	obs_data_var = obs_ds[obs_variable]
+	obs_time_candidates = time_coord_candidates(obs_ds, data=obs_data_var)
+	model_time_coord: str | None = None
+	obs_time_coord: str | None = None
+	if len(model_time_candidates) > 1:
+		model_time_coord = st.sidebar.selectbox(
+			"Model time coordinate", model_time_candidates, index=0, key="cmp_model_time_coord"
+		)
+	if len(obs_time_candidates) > 1:
+		obs_time_coord = st.sidebar.selectbox(
+			"Observed time coordinate", obs_time_candidates, index=0, key="cmp_obs_time_coord"
+		)
+
+	show_trend = st.sidebar.toggle("Show trend lines", value=True, key="cmp_show_trend")
 
 	with st.spinner("Building advanced comparison dashboard..."):
-		model_series = _extract_series(model_ds, model_variable, lat, lon)
-		obs_series = _extract_series(obs_ds, obs_variable, lat, lon)
+		model_series = _extract_series(model_ds, model_variable, lat, lon, time_coord=model_time_coord)
+		obs_series = _extract_series(obs_ds, obs_variable, lat, lon, time_coord=obs_time_coord)
 		df = _align_series(model_series, obs_series)
 
 	years = sorted(df.index.year.unique().tolist())
