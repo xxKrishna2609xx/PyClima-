@@ -11,6 +11,8 @@ import pandas as pd
 import streamlit as st
 import xarray as xr
 
+from . import config
+
 
 def _hash_bytes(data: bytes) -> str:
 	"""Return a short hash for cache keys."""
@@ -94,6 +96,56 @@ def load_dataset(path: Path | str | bytes) -> xr.Dataset:
 	raise TypeError("Unsupported dataset source")
 
 
+# ---------------------------------------------------------------------------
+# Spatial coordinate resolution helpers
+# ---------------------------------------------------------------------------
+
+def find_lat_dim(ds_or_data: xr.Dataset | xr.DataArray) -> str | None:
+	"""Return the name of the latitude dimension/coordinate, or None if absent.
+
+	Searches the dataset/array dims and coords against ``config.LAT_ALIASES``
+	(case-insensitive) so datasets using ``latitude``, ``nav_lat``, ``TLAT``,
+	``y``, etc. are handled without hardcoding ``"lat"`` everywhere.
+	"""
+	dims_and_coords: set[str] = set()
+	if isinstance(ds_or_data, xr.Dataset):
+		dims_and_coords.update(ds_or_data.dims)
+		dims_and_coords.update(ds_or_data.coords)
+	else:
+		dims_and_coords.update(ds_or_data.dims)
+		dims_and_coords.update(ds_or_data.coords)
+
+	lower_map = {name.lower(): name for name in dims_and_coords}
+	for alias in config.LAT_ALIASES:
+		if alias.lower() in lower_map:
+			return lower_map[alias.lower()]
+	return None
+
+
+def find_lon_dim(ds_or_data: xr.Dataset | xr.DataArray) -> str | None:
+	"""Return the name of the longitude dimension/coordinate, or None if absent.
+
+	Mirrors ``find_lat_dim`` but for longitude aliases in ``config.LON_ALIASES``.
+	"""
+	dims_and_coords: set[str] = set()
+	if isinstance(ds_or_data, xr.Dataset):
+		dims_and_coords.update(ds_or_data.dims)
+		dims_and_coords.update(ds_or_data.coords)
+	else:
+		dims_and_coords.update(ds_or_data.dims)
+		dims_and_coords.update(ds_or_data.coords)
+
+	lower_map = {name.lower(): name for name in dims_and_coords}
+	for alias in config.LON_ALIASES:
+		if alias.lower() in lower_map:
+			return lower_map[alias.lower()]
+	return None
+
+
+# ---------------------------------------------------------------------------
+# Variable filtering helpers
+# ---------------------------------------------------------------------------
+
 def dataset_variables(ds: xr.Dataset) -> list[str]:
 	"""Return numeric data variable names suitable for plotting."""
 
@@ -142,14 +194,26 @@ def variables_with_time_dim(ds: xr.Dataset) -> list[str]:
 
 
 def variables_with_lat_lon(ds: xr.Dataset) -> list[str]:
-	"""Variables that include both lat and lon dimensions."""
+	"""Variables that include both lat-like and lon-like dimensions.
+
+	Uses ``find_lat_dim`` / ``find_lon_dim`` instead of hard-coding ``"lat"``
+	and ``"lon"``, so datasets with non-standard coordinate names are supported.
+	"""
+	lat_dim = find_lat_dim(ds)
+	lon_dim = find_lon_dim(ds)
+	if lat_dim is None or lon_dim is None:
+		return []
 
 	result: list[str] = []
 	for name, var in ds.data_vars.items():
-		if "lat" in var.dims and "lon" in var.dims:
+		if lat_dim in var.dims and lon_dim in var.dims:
 			result.append(name)
 	return sorted(result)
 
+
+# ---------------------------------------------------------------------------
+# Time index helpers
+# ---------------------------------------------------------------------------
 
 def get_time_index(ds: xr.Dataset, coord_name: Optional[str] = None, data: xr.DataArray | None = None) -> Optional[pd.DatetimeIndex]:
 	"""Return a timezone-naive DatetimeIndex for the given or first time-like coord.
@@ -213,27 +277,37 @@ def get_time_index(ds: xr.Dataset, coord_name: Optional[str] = None, data: xr.Da
 		return None
 
 
-def dataset_year_bounds(ds: xr.Dataset) -> tuple[int, int]:
-	"""Return min and max years, falling back to (2000, 2000) if missing."""
+# ---------------------------------------------------------------------------
+# Coordinate bounds helpers
+# ---------------------------------------------------------------------------
+
+def dataset_year_bounds(ds: xr.Dataset) -> tuple[int, int] | None:
+	"""Return (min_year, max_year) or None if no valid time coordinate exists."""
 
 	idx = get_time_index(ds)
 	if idx is None or len(idx) == 0:
-		return (2000, 2000)
+		return None
 	years = idx.year
 	return int(years.min()), int(years.max())
 
 
-def dataset_lat_bounds(ds: xr.Dataset) -> tuple[float, float]:
-	if "lat" not in ds:
-		return (-90.0, 90.0)
-	vals = ds["lat"].values
+def dataset_lat_bounds(ds: xr.Dataset) -> tuple[float, float] | None:
+	"""Return (lat_min, lat_max) or None if no lat-like coordinate is found."""
+
+	lat_dim = find_lat_dim(ds)
+	if lat_dim is None or lat_dim not in ds:
+		return None
+	vals = ds[lat_dim].values
 	return float(vals.min()), float(vals.max())
 
 
-def dataset_lon_bounds(ds: xr.Dataset) -> tuple[float, float]:
-	if "lon" not in ds:
-		return (-180.0, 180.0)
-	vals = ds["lon"].values
+def dataset_lon_bounds(ds: xr.Dataset) -> tuple[float, float] | None:
+	"""Return (lon_min, lon_max) or None if no lon-like coordinate is found."""
+
+	lon_dim = find_lon_dim(ds)
+	if lon_dim is None or lon_dim not in ds:
+		return None
+	vals = ds[lon_dim].values
 	return float(vals.min()), float(vals.max())
 
 

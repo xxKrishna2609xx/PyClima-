@@ -8,6 +8,7 @@ import plotly.graph_objects as go
 import streamlit as st
 import xarray as xr
 
+from . import config
 from .data_loader import (
 	dataset_lat_bounds,
 	dataset_lon_bounds,
@@ -19,6 +20,7 @@ from .ui_helpers import (
 	format_value,
 	intersect_bounds,
 	load_optional_dataset,
+	pick_default_variable,
 	variable_label_map,
 )
 
@@ -64,7 +66,7 @@ def build_comparison_figure(
 			y=df["Model"],
 			name="Model",
 			mode="lines+markers",
-			line={"color": "#4FC3F7", "width": 2.7, "shape": "spline", "smoothing": 0.8},
+			line={"color": config.SERIES_LINE_COLOR, "width": 2.7, "shape": "spline", "smoothing": 0.8},
 			marker={"size": 5},
 			hovertemplate="Time: %{x|%Y-%m-%d}<br>Model: %{y:.3f}<extra></extra>",
 		)
@@ -76,7 +78,7 @@ def build_comparison_figure(
 			y=df["Observed"],
 			name="Observed",
 			mode="lines+markers",
-			line={"color": "#FF8A65", "width": 2.7, "shape": "spline", "smoothing": 0.8},
+			line={"color": config.OBSERVED_LINE_COLOR, "width": 2.7, "shape": "spline", "smoothing": 0.8},
 			marker={"size": 5},
 			hovertemplate="Time: %{x|%Y-%m-%d}<br>Observed: %{y:.3f}<extra></extra>",
 		)
@@ -105,7 +107,7 @@ def build_comparison_figure(
 			mode="lines",
 			line={"width": 0},
 			fill="tonexty",
-			fillcolor="rgba(255, 193, 7, 0.17)",
+			fillcolor=config.DIFF_FILL_COLOR,
 			customdata=df["Difference"],
 			hovertemplate="Time: %{x|%Y-%m-%d}<br>Model - Observed: %{customdata:.3f}<extra></extra>",
 		)
@@ -120,7 +122,7 @@ def build_comparison_figure(
 				y=model_trend,
 				name="Model trend",
 				mode="lines",
-				line={"color": "#7FDBFF", "dash": "dash", "width": 2},
+				line={"color": config.MODEL_TREND_COLOR, "dash": "dash", "width": 2},
 				hovertemplate="Time: %{x|%Y-%m-%d}<br>Model trend: %{y:.3f}<extra></extra>",
 			)
 		)
@@ -130,7 +132,7 @@ def build_comparison_figure(
 				y=obs_trend,
 				name="Observed trend",
 				mode="lines",
-				line={"color": "#FFC1A6", "dash": "dash", "width": 2},
+				line={"color": config.TREND_LINE_COLOR, "dash": "dash", "width": 2},
 				hovertemplate="Time: %{x|%Y-%m-%d}<br>Observed trend: %{y:.3f}<extra></extra>",
 			)
 		)
@@ -214,17 +216,12 @@ def render_comparison_dashboard(primary_ds: xr.Dataset) -> None:
 	obs_label_map = variable_label_map(obs_vars)
 	model_labels = list(model_label_map)
 	obs_labels = list(obs_label_map)
-	preferred = "tas_global_avg_ann"
-	if preferred in model_vars:
-		default_model_var = preferred
-	else:
-		default_model_var = next((v for v in model_vars if "tas" in v.lower() or "temp" in v.lower()), model_vars[0])
-	if default_model_var in obs_vars:
-		default_obs_var = default_model_var
-	elif preferred in obs_vars:
-		default_obs_var = preferred
-	else:
-		default_obs_var = next((v for v in obs_vars if "tas" in v.lower() or "temp" in v.lower()), obs_vars[0])
+
+	# Use config-driven preference list for default variable selection
+	default_model_var = pick_default_variable(model_vars)
+	default_obs_var = (
+		default_model_var if default_model_var in obs_vars else pick_default_variable(obs_vars)
+	)
 
 	default_model_label = next(label for label, var in model_label_map.items() if var == default_model_var)
 	default_obs_label = next(label for label, var in obs_label_map.items() if var == default_obs_var)
@@ -244,8 +241,19 @@ def render_comparison_dashboard(primary_ds: xr.Dataset) -> None:
 	model_variable = model_label_map[selected_model_label]
 	obs_variable = obs_label_map[selected_obs_label]
 
-	lat_bounds = intersect_bounds(dataset_lat_bounds(model_ds), dataset_lat_bounds(obs_ds))
-	lon_bounds = intersect_bounds(dataset_lon_bounds(model_ds), dataset_lon_bounds(obs_ds))
+	# Resolve bounds — handle None (missing coord) gracefully
+	model_lat = dataset_lat_bounds(model_ds)
+	obs_lat = dataset_lat_bounds(obs_ds)
+	model_lon = dataset_lon_bounds(model_ds)
+	obs_lon = dataset_lon_bounds(obs_ds)
+
+	if model_lat is None or obs_lat is None or model_lon is None or obs_lon is None:
+		st.error("One or both datasets are missing recognisable latitude/longitude coordinates.")
+		st.stop()
+
+	lat_bounds = intersect_bounds(model_lat, obs_lat)
+	lon_bounds = intersect_bounds(model_lon, obs_lon)
+
 	lat = st.sidebar.slider(
 		"Latitude",
 		float(lat_bounds[0]),
@@ -334,4 +342,4 @@ def render_comparison_dashboard(primary_ds: xr.Dataset) -> None:
 	with st.expander("Difference values preview"):
 		preview = df[["Difference"]].copy()
 		preview.index.name = "Time"
-		st.dataframe(preview.tail(25), use_container_width=True)
+		st.dataframe(preview.tail(config.PREVIEW_TABLE_ROWS), use_container_width=True)

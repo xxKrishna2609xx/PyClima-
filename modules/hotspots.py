@@ -7,7 +7,8 @@ import pandas as pd
 import plotly.express as px
 import xarray as xr
 
-from .data_loader import get_time_index, time_coord_candidates
+from . import config
+from .data_loader import find_lat_dim, find_lon_dim, get_time_index, time_coord_candidates
 
 
 def _slice_years(ds: xr.Dataset, start_year: int, end_year: int, data: xr.DataArray | None = None) -> xr.Dataset:
@@ -44,27 +45,41 @@ def show_hotspots(ds: xr.Dataset, variable: str, baseline: tuple[int, int], rece
 	"""Return (fig, table_df) for warming hotspots between two periods."""
 
 	data = ds[variable]
-	if not ("lat" in data.dims and "lon" in data.dims):
+
+	# Resolve lat/lon dimension names dynamically from config aliases
+	lat_dim = find_lat_dim(data)
+	lon_dim = find_lon_dim(data)
+
+	if not (lat_dim and lat_dim in data.dims and lon_dim and lon_dim in data.dims):
 		raise ValueError("Climate Hotspots requires a variable with lat/lon dimensions; choose a spatial field.")
 
 	baseline_mean = _mean_over_period(ds, variable, baseline[0], baseline[1])
 	recent_mean = _mean_over_period(ds, variable, recent[0], recent[1])
 	diff = recent_mean - baseline_mean
-	if "lat" in diff.dims:
-		diff = diff.sortby("lat")
-	if "lon" in diff.dims:
-		diff = diff.sortby("lon")
+
+	# Re-resolve lat/lon on diff since it may have fewer dims after slicing
+	lat_dim_diff = find_lat_dim(diff)
+	lon_dim_diff = find_lon_dim(diff)
+
+	if lat_dim_diff and lat_dim_diff in diff.dims:
+		diff = diff.sortby(lat_dim_diff)
+	if lon_dim_diff and lon_dim_diff in diff.dims:
+		diff = diff.sortby(lon_dim_diff)
+
 	diff = diff.squeeze()
-	if "lat" in diff.dims and "lon" in diff.dims:
-		diff = diff.transpose("lat", "lon")
+
+	if lat_dim_diff and lon_dim_diff and lat_dim_diff in diff.dims and lon_dim_diff in diff.dims:
+		diff = diff.transpose(lat_dim_diff, lon_dim_diff)
+
 	array = diff.values
 	mask = np.isfinite(array)
 	array = np.where(mask, array, np.nan)
+
 	fig = px.imshow(
 		array,
-		x=diff["lon"].values if "lon" in diff.coords else None,
-		y=diff["lat"].values if "lat" in diff.coords else None,
-		color_continuous_scale="Turbo",
+		x=diff[lon_dim_diff].values if lon_dim_diff and lon_dim_diff in diff.coords else None,
+		y=diff[lat_dim_diff].values if lat_dim_diff and lat_dim_diff in diff.coords else None,
+		color_continuous_scale=config.HOTSPOT_COLORSCALE,
 		origin="lower",
 	)
 	fig.update_layout(
@@ -76,15 +91,15 @@ def show_hotspots(ds: xr.Dataset, variable: str, baseline: tuple[int, int], rece
 	)
 
 	table_df = None
-	if "lat" in diff.coords and "lon" in diff.coords:
-		stacked = diff.stack(points=("lat", "lon")).reset_index("points")
+	if lat_dim_diff and lon_dim_diff and lat_dim_diff in diff.coords and lon_dim_diff in diff.coords:
+		stacked = diff.stack(points=(lat_dim_diff, lon_dim_diff)).reset_index("points")
 		df = pd.DataFrame({
-			"lat": stacked["lat"].values,
-			"lon": stacked["lon"].values,
+			"lat": stacked[lat_dim_diff].values,
+			"lon": stacked[lon_dim_diff].values,
 			"delta": stacked.values,
 		})
 		df = df.replace([np.inf, -np.inf], np.nan).dropna()
-		df = df.sort_values("delta", ascending=False).head(10)
+		df = df.sort_values("delta", ascending=False).head(config.HOTSPOT_TABLE_TOP_N)
 		table_df = df
 
 	return fig, table_df

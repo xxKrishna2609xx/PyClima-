@@ -8,14 +8,17 @@ import plotly.graph_objects as go
 import streamlit as st
 import xarray as xr
 
+from . import config
 from .data_loader import (
 	dataset_lat_bounds,
 	dataset_lon_bounds,
+	find_lat_dim,
+	find_lon_dim,
 	get_time_index,
 	time_coord_candidates,
 	variables_with_time_dim,
 )
-from .ui_helpers import format_value, variable_label_map
+from .ui_helpers import format_value, pick_default_variable, variable_label_map
 
 
 def _is_time_like(name: str) -> bool:
@@ -49,10 +52,15 @@ def extract_series(
 		raise ValueError(f"Variable '{variable}' was not found in the selected dataset")
 
 	data = ds[variable]
-	if "lat" in data.dims:
-		data = data.sel(lat=lat, method="nearest")
-	if "lon" in data.dims:
-		data = data.sel(lon=lon, method="nearest")
+
+	# Resolve lat/lon dim names dynamically
+	lat_dim = find_lat_dim(data)
+	lon_dim = find_lon_dim(data)
+
+	if lat_dim and lat_dim in data.dims:
+		data = data.sel({lat_dim: lat}, method="nearest")
+	if lon_dim and lon_dim in data.dims:
+		data = data.sel({lon_dim: lon}, method="nearest")
 
 	selected_time_coord = time_coord or _pick_time_coord(ds, data)
 	if selected_time_coord not in data.dims and selected_time_coord not in data.coords:
@@ -61,7 +69,9 @@ def extract_series(
 	for dim in list(data.dims):
 		if dim == selected_time_coord:
 			continue
-		if dim in {"lat", "lon"}:
+		if lat_dim and dim == lat_dim:
+			continue
+		if lon_dim and dim == lon_dim:
 			continue
 		data = data.mean(dim=dim, skipna=True)
 
@@ -112,7 +122,7 @@ def build_time_series_figure(
 			y=series.values,
 			name=variable,
 			mode="lines+markers",
-			line={"color": "#4FC3F7", "width": 2.9, "shape": "spline", "smoothing": 0.8},
+			line={"color": config.SERIES_LINE_COLOR, "width": 2.9, "shape": "spline", "smoothing": 0.8},
 			marker={"size": 5},
 			hovertemplate="Time: %{x|%Y-%m-%d}<br>Value: %{y:.3f}<extra></extra>",
 		)
@@ -126,7 +136,7 @@ def build_time_series_figure(
 				y=trend.values,
 				name="Trend",
 				mode="lines",
-				line={"color": "#FFC1A6", "dash": "dash", "width": 2.2},
+				line={"color": config.TREND_LINE_COLOR, "dash": "dash", "width": 2.2},
 				hovertemplate="Time: %{x|%Y-%m-%d}<br>Trend: %{y:.3f}<extra></extra>",
 			)
 		)
@@ -204,18 +214,21 @@ def render_time_series_dashboard(ds: xr.Dataset) -> None:
 
 	label_map = variable_label_map(variables)
 	labels = list(label_map)
-	preferred = "tas_global_avg_ann"
-	if preferred in variables:
-		default_var = preferred
-	else:
-		default_var = next((v for v in variables if "tas" in v.lower() or "temp" in v.lower()), variables[0])
+	default_var = pick_default_variable(variables)
 	default_label = next(label for label, var in label_map.items() if var == default_var)
 
 	selected_label = st.sidebar.selectbox("Variable", labels, index=labels.index(default_label), key="trend_variable")
 	variable = label_map[selected_label]
 
-	lat_min, lat_max = dataset_lat_bounds(ds)
-	lon_min, lon_max = dataset_lon_bounds(ds)
+	lat_bounds = dataset_lat_bounds(ds)
+	lon_bounds = dataset_lon_bounds(ds)
+
+	if lat_bounds is None or lon_bounds is None:
+		st.error("This dataset does not contain recognisable latitude/longitude coordinates.")
+		return
+
+	lat_min, lat_max = lat_bounds
+	lon_min, lon_max = lon_bounds
 	lat = st.sidebar.slider("Latitude", float(lat_min), float(lat_max), value=float((lat_min + lat_max) / 2), key="trend_lat")
 	lon = st.sidebar.slider("Longitude", float(lon_min), float(lon_max), value=float((lon_min + lon_max) / 2), key="trend_lon")
 
@@ -270,4 +283,4 @@ def render_time_series_dashboard(ds: xr.Dataset) -> None:
 	with st.expander("Time series values preview"):
 		preview = pd.DataFrame({"Value": series})
 		preview.index.name = "Time"
-		st.dataframe(preview.tail(25), use_container_width=True)
+		st.dataframe(preview.tail(config.PREVIEW_TABLE_ROWS), use_container_width=True)

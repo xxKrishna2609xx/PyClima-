@@ -2,15 +2,12 @@
 
 from __future__ import annotations
 
-from pathlib import Path
 import pandas as pd
 import streamlit as st
 import xarray as xr
 
+from . import config
 from .data_loader import load_dataset, summarize_dataset
-
-
-SAMPLE_DATA_PATH = Path("datasets/sample.nc")
 
 
 def inject_custom_css() -> None:
@@ -53,11 +50,12 @@ def inject_custom_css() -> None:
 	)
 
 
-def preferred_local_dataset() -> tuple[str | None, Path | None]:
-	if SAMPLE_DATA_PATH.exists():
-		return SAMPLE_DATA_PATH.name, SAMPLE_DATA_PATH
+def preferred_local_dataset() -> tuple[str | None, None] | tuple[str, object]:
+	"""Find the best available local sample dataset file."""
+	if config.SAMPLE_DATA_PATH.exists():
+		return config.SAMPLE_DATA_PATH.name, config.SAMPLE_DATA_PATH
 	# Sort so the first file is always the same regardless of filesystem ordering
-	alt_files = sorted(Path("datasets").glob("*.nc"))
+	alt_files = sorted(config.SAMPLE_DATA_PATH.parent.glob("*.nc"))
 	if alt_files:
 		path = alt_files[0]
 		return path.name, path
@@ -108,21 +106,38 @@ def render_dataset_summary(ds_label: str, ds: xr.Dataset) -> None:
 
 
 def variable_category(variable: str) -> str:
+	"""Classify a variable name into a human-readable category.
+
+	Categories and their trigger substrings are defined in
+	``config.VARIABLE_CATEGORIES`` so new categories can be added
+	without touching any other module.
+	"""
 	name = variable.lower()
-	if "tas" in name or "temp" in name:
-		return "Temperature"
-	if name.startswith("pr") or "precip" in name or "rain" in name:
-		return "Precipitation"
-	if "sst" in name or "sea_surface" in name:
-		return "Sea Surface"
-	if "wind" in name:
-		return "Wind"
-	if "humidity" in name or "rh" in name:
-		return "Humidity"
+	for category, substrings in config.VARIABLE_CATEGORIES.items():
+		if any(sub in name for sub in substrings):
+			return category
 	return "Climate"
 
 
+def pick_default_variable(variables: list[str]) -> str:
+	"""Return the best default variable from a list using ``config.PREFERRED_VARIABLES``.
+
+	Tries each entry in the preference list in order. Falls back to the
+	first variable that contains ``"tas"`` or ``"temp"``, then to ``variables[0]``.
+	"""
+	for preferred in config.PREFERRED_VARIABLES:
+		if preferred in variables:
+			return preferred
+	# Substring fallback
+	for var in variables:
+		lv = var.lower()
+		if any(sub in lv for sub in config.VARIABLE_CATEGORIES.get("Temperature", [])):
+			return var
+	return variables[0]
+
+
 def variable_label_map(variables: list[str]) -> dict[str, str]:
+	"""Map human-readable labels (``"Category - varname"``) to raw variable names."""
 	label_map: dict[str, str] = {}
 	existing_labels: set[str] = set()
 	for var in variables:
@@ -137,7 +152,11 @@ def variable_label_map(variables: list[str]) -> dict[str, str]:
 	return label_map
 
 
-def intersect_bounds(primary_bounds: tuple[float, float], secondary_bounds: tuple[float, float]) -> tuple[float, float]:
+def intersect_bounds(
+	primary_bounds: tuple[float, float],
+	secondary_bounds: tuple[float, float],
+) -> tuple[float, float]:
+	"""Return the intersection of two (min, max) bound tuples."""
 	p_min, p_max = sorted(primary_bounds)
 	s_min, s_max = sorted(secondary_bounds)
 	low = max(p_min, s_min)

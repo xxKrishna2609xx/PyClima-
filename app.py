@@ -18,6 +18,26 @@ from modules.ui_helpers import (
 )
 
 
+def _dynamic_year_default(min_year: int, max_year: int) -> int:
+	"""Return a sensible default year as the midpoint of the dataset range."""
+	return (min_year + max_year) // 2
+
+
+def _dynamic_hotspot_defaults(min_year: int, max_year: int) -> tuple[tuple[int, int], tuple[int, int]]:
+	"""Compute baseline and recent period defaults as first/last 20% of the dataset range.
+
+	Falls back to equal halves when the range is very short (< 5 years).
+	"""
+	span = max_year - min_year
+	if span < 5:
+		return (min_year, max_year), (min_year, max_year)
+
+	fifth = max(1, span // 5)
+	baseline = (min_year, min_year + fifth)
+	recent = (max_year - fifth, max_year)
+	return baseline, recent
+
+
 def main() -> None:
 	st.set_page_config(page_title="PyClimaExplorer", layout="wide")
 	inject_custom_css()
@@ -60,12 +80,16 @@ def main() -> None:
 			st.error("No variables with lat/lon dimensions are available for mapping.")
 			return
 		variable = st.sidebar.selectbox("Variable", variables)
-		min_year, max_year = dataset_year_bounds(ds)
+		year_bounds = dataset_year_bounds(ds)
+		if year_bounds is None:
+			st.error("This dataset does not contain a recognisable time coordinate.")
+			return
+		min_year, max_year = year_bounds
 		if min_year == max_year:
 			year = min_year
 			st.sidebar.info(f"Single year detected: {year}")
 		else:
-			year_default = min(max_year, max(min_year, 2000))
+			year_default = _dynamic_year_default(min_year, max_year)
 			year = st.sidebar.slider("Year", min_year, max_year, value=year_default)
 		try:
 			fig = show_global_map(ds, variable, year)
@@ -89,27 +113,28 @@ def main() -> None:
 			st.error("No variables with both spatial and temporal dimensions are available for hotspots.")
 			return
 		variable = st.sidebar.selectbox("Variable", variables)
-		min_year, max_year = dataset_year_bounds(ds)
+		year_bounds = dataset_year_bounds(ds)
+		if year_bounds is None:
+			st.error("This dataset does not contain a recognisable time coordinate.")
+			return
+		min_year, max_year = year_bounds
 		if min_year == max_year:
 			st.sidebar.info("Single-year dataset; hotspot periods collapse to the available year.")
 			baseline_years = (min_year, max_year)
 			recent_years = (min_year, max_year)
 		else:
-			baseline_start = max(min_year, min(max_year, 1950))
-			baseline_end = max(baseline_start + 1, min(max_year, 1970))
-			recent_start = max(min_year, min(max_year, 2000))
-			recent_end = max(recent_start + 1, max_year)
+			default_baseline, default_recent = _dynamic_hotspot_defaults(min_year, max_year)
 			baseline_years = st.sidebar.slider(
 				"Baseline period",
 				min_year,
 				max_year,
-				value=(baseline_start, baseline_end) if baseline_start < baseline_end else (min_year, max_year),
+				value=default_baseline,
 			)
 			recent_years = st.sidebar.slider(
 				"Recent period",
 				min_year,
 				max_year,
-				value=(recent_start, recent_end) if recent_start < recent_end else (min_year, max_year),
+				value=default_recent,
 			)
 		try:
 			fig, table_df = show_hotspots(ds, variable, baseline_years, recent_years)
